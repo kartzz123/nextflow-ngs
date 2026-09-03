@@ -1,0 +1,45 @@
+#!/bin/bash
+set -euo pipefail
+
+# ==============================================================================
+# AWS S3 Data Management Script for NGS Processing
+# ==============================================================================
+
+S3_BUCKET_NAME="s3://my-ngs-data-bucket-name"
+SAMPLE_ID="ERR2356709"
+
+LOCAL_DATA_DIR="/data"
+LOCAL_RESULTS_DIR="/data/results"
+
+S3_INPUT_PATH="${S3_BUCKET_NAME}/raw_fastq/${SAMPLE_ID}"
+S3_OUTPUT_PATH="${S3_BUCKET_NAME}/pipeline_outputs/${SAMPLE_ID}"
+
+# Step 1: Check AWS CLI Installation
+if ! command -v aws &> /dev/null; then
+    echo "ERROR: AWS CLI is not installed. Please install and configure it."
+    exit 1
+fi
+
+# Step 2: Download FASTQ files from AWS S3 to local container volume
+echo "==> Downloading FASTQ datasets from ${S3_INPUT_PATH}..."
+mkdir -p "${LOCAL_DATA_DIR}"
+
+aws s3 cp "${S3_INPUT_PATH}/${SAMPLE_ID}_1.fastq.gz" "${LOCAL_DATA_DIR}/${SAMPLE_ID}_1.fastq.gz"
+aws s3 cp "${S3_INPUT_PATH}/${SAMPLE_ID}_2.fastq.gz" "${LOCAL_DATA_DIR}/${SAMPLE_ID}_2.fastq.gz"
+
+echo "==> Download complete."
+
+# Step 3: Run the Dockerized Nextflow Pipeline
+echo "==> Executing Nextflow Pipeline inside Docker..."
+docker run --rm \
+    -v "${LOCAL_DATA_DIR}:/data" \
+    -e READ1="/data/${SAMPLE_ID}_1.fastq.gz" \
+    -e READ2="/data/${SAMPLE_ID}_2.fastq.gz" \
+    -e OUTDIR="/data/results" \
+    ngs-pipeline:latest
+
+# Step 4: Upload generated pipeline results to AWS S3
+echo "==> Uploading pipeline outputs to ${S3_OUTPUT_PATH}..."
+aws s3 sync "${LOCAL_RESULTS_DIR}/" "${S3_OUTPUT_PATH}/" --exact-timestamps
+
+echo "==> Pipeline run and AWS S3 upload successfully finished!"
